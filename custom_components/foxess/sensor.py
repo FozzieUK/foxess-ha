@@ -63,7 +63,6 @@ _ENDPOINT_REPORT = "https://www.foxesscloud.com/c/v0/device/history/report"
 _ENDPOINT_ADDRESSBOOK = "https://www.foxesscloud.com/c/v0/device/addressbook?deviceID="
 
 _ENDPOINT_OA_DOMAIN = "https://www.foxesscloud.com"
-_ENDPOINT_OA_REAL = "https://www.foxesscloud.com/op/v0/device/real/query"
 _ENDPOINT_OA_BATTERY_SETTINGS = "/op/v0/device/battery/soc/get?sn="
 _ENDPOINT_OA_REPORT = "/op/v0/device/report/query"
 _ENDPOINT_OA_DEVICE_DETAIL = "/op/v0/device/detail?sn="
@@ -74,7 +73,7 @@ METHOD_POST = "POST"
 METHOD_GET = "GET"
 DEFAULT_ENCODING = "UTF-8"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-TRY_OLD_CLOUD_API = True
+TRY_OLD_CLOUD_API = False
 
 ATTR_DEVICE_SN = "deviceSN"
 ATTR_PLANTNAME = "plantName"
@@ -98,7 +97,7 @@ CONF_SYSTEM_ID = "system_id"
 DEFAULT_NAME = "FoxESS"
 DEFAULT_VERIFY_SSL = False # True
 
-SCAN_MINUTES = 5 # number of minutes betwen API requests 
+SCAN_MINUTES = 1 # number of minutes betwen API requests 
 SCAN_INTERVAL = timedelta(minutes=SCAN_MINUTES)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
@@ -116,7 +115,7 @@ token = None
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the FoxESS sensor."""
-    global apiKey, deviceSN, deviceID
+    global apiKey, deviceSN, deviceID, TimeSlice,allData,LastHour
     name = config.get(CONF_NAME)
     username = config.get(CONF_USERNAME)
     password = config.get(CONF_PASSWORD)
@@ -126,85 +125,110 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     _LOGGER.debug("API Key:" + apiKey)
     _LOGGER.debug("Device SN:" + deviceSN)
     _LOGGER.debug("Device ID:" + deviceID)
-
     _LOGGER.debug( f"FoxESS Scan Interval: {SCAN_MINUTES} minutes" )
-    
+    TimeSlice = -1
+    LastHour = 0
+    allData = {
+        "report":{},
+        "reportDailyGeneration": {},
+        "raw":{},
+        "battery":{},
+        "online":False
+    }
+
+
+
     async def async_update_data():
         _LOGGER.debug("Updating data from https://www.foxesscloud.com/")
 
-        allData = {
-            "report":{},
-            "reportDailyGeneration": {},
-            "raw":{},
-            "online":False
-        }
+        global token,TimeSlice,allData,LastHour
+        hournow = datetime.now().strftime("%_H") # update hour now
+        _LOGGER.debug(f"Time now: {hournow}, last {LastHour}")
 
-        hashedPassword = hashlib.md5(password.encode()).hexdigest()
-        global token
-        if token is None:
-            _LOGGER.debug("Token is empty, authenticating")
-            token = await authAndgetToken(hass, username, hashedPassword)
+        TimeSlice+=1
+        if (TimeSlice % 5 == 0):
+            _LOGGER.debug(f"TimeSlice 5 Interval: {TimeSlice}")
 
-        user_agent = USER_AGENT # or use- user_agent_rotator.get_random_user_agent()
-        headersData = {"token": token,
-                       "User-Agent": user_agent,
-                       "Accept": "application/json, text/plain, */*",
-                       "lang": "en",
-                       "sec-ch-ua-platform": "macOS",
-                       "Sec-Fetch-Site": "same-origin",
-                       "Sec-Fetch-Mode": "cors",
-                       "Sec-Fetch-Dest": "empty",
-                       "Referer": "https://www.foxesscloud.com/bus/device/inverterDetail?id=xyz&flowType=1&status=1&hasPV=true&hasBattery=false",
-                       "Accept-Language":"en-US;q=0.9,en;q=0.8,de;q=0.7,nl;q=0.6",
-                       "Connection": "close",
-                       "X-Requested-With": "XMLHttpRequest"}
+            # try old cloud interface - doesn't matter if this fails
+            hashedPassword = hashlib.md5(password.encode()).hexdigest()
+            if token is None:
+                _LOGGER.debug("Token is empty, authenticating")
+                token = await authAndgetToken(hass, username, hashedPassword)
 
-        # try old cloud interface - doesn't matter if this fails
-        if TRY_OLD_CLOUD_API:
-            addfail = await getAddresbook(hass, headersData, allData, username, hashedPassword, 0)
+            user_agent = USER_AGENT # or use- user_agent_rotator.get_random_user_agent()
+            headersData = {"token": token,
+                           "User-Agent": user_agent,
+                           "Accept": "application/json, text/plain, */*",
+                           "lang": "en",
+                           "sec-ch-ua-platform": "macOS",
+                           "Sec-Fetch-Site": "same-origin",
+                           "Sec-Fetch-Mode": "cors",
+                           "Sec-Fetch-Dest": "empty",
+                           "Referer": "https://www.foxesscloud.com/bus/device/inverterDetail?id=xyz&flowType=1&status=1&hasPV=true&hasBattery=false",
+                           "Accept-Language":"en-US;q=0.9,en;q=0.8,de;q=0.7,nl;q=0.6",
+                           "Connection": "close",
+                           "X-Requested-With": "XMLHttpRequest"}
+
+            if TRY_OLD_CLOUD_API:
+                addfail = await getAddresbook(hass, headersData, allData, username, hashedPassword, deviceID)
+                if addfail == 0:
+                    _LOGGER.debug("FoxESS old cloud API no Addressbook data, token reset")
+                else:
+                    _LOGGER.debug("FoxESS old cloud API Addressbook data read ok")
+
+            # try the openapi see if we get a response
+            if TimeSlice==0:
+                # do this at startup and then every 15 minutes
+                _LOGGER.error("Battery settings read")
+                addfail = await getOABatterySettings(hass, allData, deviceSN, apiKey) # read in battery settings, not sure what to do with these yet, poll every 5/15/30/60 mins ?
+                await asyncio.sleep(1)  # delay for OpenAPI between api calls
+
+            addfail = await getOADeviceDetail(hass, allData, deviceSN, apiKey)
             if addfail == 0:
-                _LOGGER.debug("FoxESS old cloud API no Addressbook data, token reset")
-            else:
-                _LOGGER.debug("FoxESS old cloud API Addressbook data read ok")
-
-        # try the openapi see if we get a response
-
-        addfail = await getOABatterySettings(hass, allData, deviceSN, apiKey, 0) # read in battery settings, not sure what to do with these yet, poll every 5/15/30/60 mins ?
-        await asyncio.sleep(1)  # delay for OpenAPI between api calls
-
-        addfail = await getOADeviceDetail(hass, allData, deviceSN, apiKey, 0)
-        if addfail == 0:
-            if allData["addressbook"]["result"]["status"] is not None:
-                statetest = int(allData["addressbook"]["result"]["status"])
-            else:
-                statetest = 0
-            _LOGGER.debug(f" Statetest {statetest}")
+                if allData["addressbook"]["status"] is not None:
+                    statetest = int(allData["addressbook"]["status"])
+                else:
+                    statetest = 0
+                _LOGGER.debug(f" Statetest {statetest}")
                 
-            if statetest in [1,2,3]:
-                allData["online"] = True
-                getError = await getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID)
-                if getError == False:
-                    await asyncio.sleep(1)  # delay for OpenAPI between api calls
-                    getError = await getReport(hass, headersData, allData, apiKey, deviceSN, deviceID)
+                if statetest in [1,2,3]:
+                    allData["online"] = True
+                    getError = await getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID)
                     if getError == False:
-                        await asyncio.sleep(1)  # delay for OpenAPI between api calls
-                        getError = await getReportDailyGeneration(hass, headersData, allData, apiKey, deviceSN, deviceID)
-                        if getError == True:
-                            allData["online"] = False
-                            _LOGGER.debug("getReportDailyGeneration False")
+                        if TimeSlice==0 or LastHour != hournow: # do this at startup, every 15 minutes and on the hour change
+                            LastHour = hournow # update the hour the last report was run
+                            await asyncio.sleep(1)  # delay for OpenAPI between api calls
+                            getError = await getReport(hass, headersData, allData, apiKey, deviceSN, deviceID)
+                            if getError == False:
+                                if TimeSlice==0:
+                                    # do this at startup, then every 15 minutes
+                                    await asyncio.sleep(1)  # delay for OpenAPI between api calls
+                                    getError = await getReportDailyGeneration(hass, headersData, allData, apiKey, deviceSN, deviceID)
+                                    if getError == True:
+                                        allData["online"] = False
+                                        _LOGGER.debug("getReportDailyGeneration False")
+                            else:
+                                allData["online"] = False
+                                _LOGGER.debug("getReport False")
+
                     else:
                         allData["online"] = False
-                        _LOGGER.debug("getReport False")
-                else:
-                    allData["online"] = False
-                    _LOGGER.debug("getRaw False")
+                        _LOGGER.debug("getRaw False")
 
-            if allData["online"] == False:
-                _LOGGER.debug("Inverter off-line or cloud timeout, not fetching additional data")
+                if allData["online"] == False:
+                    _LOGGER.debug("Inverter off-line or cloud timeout, not fetching additional data")
+            else:
+                TimeSlice=-1 # failed to get data so try again in a minute
+                
+        # actions here are every minute
+        if TimeSlice==15:
+            TimeSlice=-1
+        _LOGGER.debug(f"Auxilliary TimeSlice {TimeSlice}")
 
         _LOGGER.debug(allData)
 
         return allData
+
 
     coordinator = DataUpdateCoordinator(
         hass,
@@ -256,6 +280,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         FoxESSBoostTemp(coordinator, name, deviceID),
         FoxESSInvTemp(coordinator, name, deviceID),
         FoxESSBatSoC(coordinator, name, deviceID),
+        FoxESSBatMinSoC(coordinator, name, deviceID),
+        FoxESSBatMinSoConGrid(coordinator, name, deviceID),
         FoxESSSolarPower(coordinator, name, deviceID),
         FoxESSEnergySolar(coordinator, name, deviceID),
         FoxESSInverter(coordinator, name, deviceID),
@@ -330,7 +356,7 @@ async def authAndgetToken(hass, username, hashedPassword):
     await restAuth.async_update()
 
     if restAuth.data is None:
-        _LOGGER.error("Unable to login to FoxESS Cloud - No data recived")
+        _LOGGER.error("Unable to login to FoxESS Cloud - No data received")
         return False
 
     response = json.loads(restAuth.data)
@@ -349,9 +375,9 @@ async def authAndgetToken(hass, username, hashedPassword):
     return token
 
 
-async def getAddresbook(hass, headersData, allData, username, hashedPassword, tokenRefreshRetrys):
+async def getAddresbook(hass, headersData, allData, username, hashedPassword, deviceID):
     restAddressBook = RestData(hass, METHOD_GET, _ENDPOINT_ADDRESSBOOK +
-                               deviceSN, DEFAULT_ENCODING,  None, headersData, None, None, DEFAULT_VERIFY_SSL, SSLCipherList.PYTHON_DEFAULT)
+                               deviceID, DEFAULT_ENCODING,  None, headersData, None, None, DEFAULT_VERIFY_SSL, SSLCipherList.PYTHON_DEFAULT)
     await restAddressBook.async_update()
 
     if restAddressBook.data is None:
@@ -370,7 +396,7 @@ async def getAddresbook(hass, headersData, allData, username, hashedPassword, to
             #allData['addressbook'] = response
             return 1
 
-async def getOADeviceDetail(hass, allData, deviceSN, apiKey, tokenRefreshRetrys):
+async def getOADeviceDetail(hass, allData, deviceSN, apiKey):
 
     path = "/op/v0/device/detail"
     headerData = GetAuth().get_signature(token=apiKey, path=path)
@@ -389,25 +415,23 @@ async def getOADeviceDetail(hass, allData, deviceSN, apiKey, tokenRefreshRetrys)
         if response["errno"] == 0 and response["msg"] == 'success' :
             _LOGGER.debug(f"OA Device Detail Good Response: {response['result']}")
             result = response['result']
-            allData['addressbook'] = {}
-            allData['addressbook'] = response
+            allData['addressbook'] = result
             # manually poke this in as on the old cloud it was called plantname, need to keep in line with old entity name
             plantName = result['stationName']
-            allData['addressbook']['result']['plantName'] = plantName
+            allData['addressbook']['plantName'] = plantName
 
-            _LOGGER.debug(f"OA Device Detail read")
             return False
         else:
             _LOGGER.error(f"OA Device Detail Bad Response: {response}")
             return True
 
-async def getOABatterySettings(hass, allData, deviceSN, apiKey, tokenRefreshRetrys):
+async def getOABatterySettings(hass, allData, deviceSN, apiKey):
 
     path = "/op/v0/device/battery/soc/get"
     headerData = GetAuth().get_signature(token=apiKey, path=path)
 
     path = _ENDPOINT_OA_DOMAIN + _ENDPOINT_OA_BATTERY_SETTINGS
-    _LOGGER.debug("OADevice Detail fetch " + path + deviceSN)
+    _LOGGER.debug("OABattery Settings fetch " + path + deviceSN)
 
     restOABatterySettings = RestData(hass, METHOD_GET, path + deviceSN, DEFAULT_ENCODING,  None, headerData, None, None, DEFAULT_VERIFY_SSL, SSLCipherList.PYTHON_DEFAULT)
     await restOABatterySettings.async_update()
@@ -422,6 +446,8 @@ async def getOABatterySettings(hass, allData, deviceSN, apiKey, tokenRefreshRetr
             result = response['result']
             minSoc = result['minSoc']
             minSocOnGrid = result['minSocOnGrid']
+            allData["battery"]["minSoc"] = minSoc
+            allData["battery"]["minSocOnGrid"] = minSocOnGrid
             _LOGGER.debug(f"OA Battery Settings read MinSoc: {minSoc}, MinSocOnGrid: {minSocOnGrid}")
             return False
         else:
@@ -502,7 +528,7 @@ async def getReport(hass, headersData, allData, apiKey, deviceSN, deviceID):
         if response["errno"] == 0 and response["msg"] == 'success' :
             _LOGGER.debug(f"OA Report Data fetched OK: {response} "+ restOAReport.data[:350])
             result = json.loads(restOAReport.data)['result']
-            allData['report'] = {}
+            # allData['report'] = {}
             for item in result: # json.loads(result): 
                 variableName = item['variable']
                 allData['report'][variableName] = None
@@ -607,8 +633,8 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
                                     "dspTemperature", \
                                     "epsCurrentR","epsCurrentS","epsCurrentT", \
                                     "epsPower","epsPowerR","epsPowerS","epsPowerT","epsVoltR","epsVoltS","epsVoltT", \
-                                    "feedin", "feedin2", "feedinPower", \
-                                    "generation","generationPower","gridConsumption","gridConsumption2","gridConsumptionPower", \
+                                    "feedin", "feedinPower", \
+                                    "generation","generationPower","gridConsumption","gridConsumptionPower", \
                                     "input", "invBatCurrent","invBatPower","invBatVolt","invTemperation", \
                                     "loads", "loadsPower","loadsPowerR","loadsPowerS","loadsPowerT", \
                                     "meterPower","meterPower2","meterPowerR","meterPowerS","meterPowerT","PowerFactor", \
@@ -654,8 +680,8 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
                                     "dspTemperature", \
                                     "epsCurrentR","epsCurrentS","epsCurrentT", \
                                     "epsPower","epsPowerR","epsPowerS","epsPowerT","epsVoltR", "epsVoltS", "epsVoltT", \
-                                    "feedin", "feedin2", "feedinPower", \
-                                    "generation","generationPower","gridConsumption","gridConsumption2","gridConsumptionPower", \
+                                    "feedin", "feedinPower", \
+                                    "generation","generationPower","gridConsumption","gridConsumptionPower", \
                                     "input", "invBatCurrent","invBatPower","invBatVolt","invTemperation", \
                                     "loads", "loadsPower","loadsPowerR","loadsPowerS","loadsPowerT", \
                                     "meterPower","meterPower2","meterPowerR","meterPowerS","meterPowerT","PowerFactor", \
@@ -689,7 +715,7 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
                 return True
             else:
                 _LOGGER.debug("FoxESS Raw data fetched correctly " + restRaw.data[:1200] + " ... " ) 
-                allData['raw'] = {}
+                # allData['raw'] = {}
                 for item in json.loads(restRaw.data)['result']:
                     variableName = item['variable']
                     # If data is a non-empty list, pop the last value off the list, otherwise return the previously found value
@@ -699,6 +725,8 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
                 # These don't exist in old cloud api set them to 0
                 allData['raw']['ResidualEnergy'] = 0
                 allData['raw']['todayYield'] = 0
+                allData["battery"]["minSoc"] = 0
+                allData["battery"]["minSocOnGrid"] = 0
         return False
     else:
         # Openapi responded correctly
@@ -707,7 +735,7 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
             test = json.loads(restOADeviceVariables.data)['result']
             result = test[0].get('datas')
             _LOGGER.debug(f"OA Device Variables Good Response: {result}")
-            allData['raw'] = {}
+            # allData['raw'] = {}
             for item in result: # json.loads(result): # restOADeviceVariables.data)['result']:
                 variableName = item['variable']
                 # If value exists 
@@ -715,7 +743,7 @@ async def getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID):
                     variableValue = item['value']
                 else:
                     variableValue = 0
-                    _LOGGER.debug( f"Variable {variableName} has no value, setting to zero as old i/f did" )
+                    _LOGGER.debug( f"Variable {variableName} no value, set to zero" )
 
                 allData['raw'][variableName] = variableValue
                 _LOGGER.debug( f"Variable: {variableName} being set to {allData['raw'][variableName]}" )
@@ -1606,7 +1634,7 @@ class FoxESSEnergyGenerated(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["reportDailyGeneration"]["value"] == 0:
-                energygenerated = None
+                energygenerated = 0
             else:
                 energygenerated = self.coordinator.data["reportDailyGeneration"]["value"]
                 if energygenerated > 0:
@@ -1640,7 +1668,7 @@ class FoxESSEnergyGridConsumption(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["report"]["gridConsumption"] == 0:
-                energygrid = None
+                energygrid = 0
             else:
                 energygrid = self.coordinator.data["report"]["gridConsumption"]
             return energygrid
@@ -1670,7 +1698,7 @@ class FoxESSEnergyFeedin(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["report"]["feedin"] == 0:
-                energyfeedin = None
+                energyfeedin = 0
             else:
                 energyfeedin = self.coordinator.data["report"]["feedin"]
             return energyfeedin
@@ -1700,7 +1728,7 @@ class FoxESSEnergyBatCharge(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["report"]["chargeEnergyToTal"] == 0:
-                energycharge = None
+                energycharge = 0
             else:
                 energycharge = self.coordinator.data["report"]["chargeEnergyToTal"]
             return energycharge
@@ -1730,7 +1758,7 @@ class FoxESSEnergyBatDischarge(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["report"]["dischargeEnergyToTal"] == 0:
-                energydischarge = None
+                energydischarge = 0
             else:
                 energydischarge = self.coordinator.data["report"]["dischargeEnergyToTal"]
             return energydischarge
@@ -1760,14 +1788,11 @@ class FoxESSEnergyLoad(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
             if self.coordinator.data["report"]["loads"] == 0:
-                # was getting an error on round() when load was None, changed it to 0
                 energyload = 0
             else:
                 energyload = self.coordinator.data["report"]["loads"]
             #round
             return round(energyload,3)
-            #original
-            #return energyload
         return None
 
 
@@ -1801,10 +1826,10 @@ class FoxESSInverter(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> str | None:
         if self.coordinator.data["online"]:
-            if int(self.coordinator.data["addressbook"]["result"]["status"]) == 1:
+            if int(self.coordinator.data["addressbook"]["status"]) == 1:
                 return "on-line"
             else:
-                if int(self.coordinator.data["addressbook"]["result"]["status"]) == 2:
+                if int(self.coordinator.data["addressbook"]["status"]) == 2:
                     return "in-alarm"
                 else:
                     return "off-line"
@@ -1814,10 +1839,10 @@ class FoxESSInverter(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         if self.coordinator.data["online"]:
             return {
-                ATTR_DEVICE_SN: self.coordinator.data["addressbook"]["result"][ATTR_DEVICE_SN],
-                ATTR_PLANTNAME: self.coordinator.data["addressbook"]["result"][ATTR_PLANTNAME],
-                ATTR_MODULESN: self.coordinator.data["addressbook"]["result"][ATTR_MODULESN],
-                ATTR_DEVICE_TYPE: self.coordinator.data["addressbook"]["result"][ATTR_DEVICE_TYPE],
+                ATTR_DEVICE_SN: self.coordinator.data["addressbook"][ATTR_DEVICE_SN],
+                ATTR_PLANTNAME: self.coordinator.data["addressbook"][ATTR_PLANTNAME],
+                ATTR_MODULESN: self.coordinator.data["addressbook"][ATTR_MODULESN],
+                ATTR_DEVICE_TYPE: self.coordinator.data["addressbook"][ATTR_DEVICE_TYPE],
                 #ATTR_COUNTRY: self.coordinator.data["addressbook"]["result"][ATTR_COUNTRY],
                 #ATTR_COUNTRYCODE: self.coordinator.data["addressbook"]["result"][ATTR_COUNTRYCODE],
                 #ATTR_CITY: self.coordinator.data["addressbook"]["result"][ATTR_CITY],
@@ -1932,6 +1957,62 @@ class FoxESSBatSoC(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         if self.coordinator.data["online"] and self.coordinator.data["raw"]:
             return self.coordinator.data["raw"]["SoC"]
+        return  None
+
+    @property
+    def icon(self):
+        return icon_for_battery_level(battery_level=self.native_value, charging=None)
+
+class FoxESSBatMinSoC(CoordinatorEntity, SensorEntity):
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, name, deviceID):
+        super().__init__(coordinator=coordinator)
+        _LOGGER.debug("Initiating Entity - Bat MinSoC")
+        self._attr_name = name+" - Bat MinSoC"
+        self._attr_unique_id = deviceID+"bat-minsoc"
+        self.status = namedtuple(
+            "status",
+            [
+                ATTR_DATE,
+                ATTR_TIME,
+            ],
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data["online"] and self.coordinator.data["battery"]:
+            return self.coordinator.data["battery"]["minSoc"]
+        return  None
+
+    @property
+    def icon(self):
+        return icon_for_battery_level(battery_level=self.native_value, charging=None)
+
+class FoxESSBatMinSoConGrid(CoordinatorEntity, SensorEntity):
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, name, deviceID):
+        super().__init__(coordinator=coordinator)
+        _LOGGER.debug("Initiating Entity - Bat minSocOnGrid")
+        self._attr_name = name+" - Bat minSocOnGrid"
+        self._attr_unique_id = deviceID+"bat-minSocOnGrid"
+        self.status = namedtuple(
+            "status",
+            [
+                ATTR_DATE,
+                ATTR_TIME,
+            ],
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data["online"] and self.coordinator.data["battery"]:
+            return self.coordinator.data["battery"]["minSocOnGrid"]
         return  None
 
     @property

@@ -7,7 +7,13 @@
    <a href="https://github.com/macxq/foxess-ha/actions/workflows/HACS.yaml/badge.svg?branch=main"><img src="https://github.com/macxq/foxess-ha/actions/workflows/HACS.yaml/badge.svg?branch=main"/></a>
     <a href="https://github.com/macxq/foxess-ha/actions/workflows/hassfest.yaml/badge.svg"><img src="https://github.com/macxq/foxess-ha/actions/workflows/hassfest.yaml/badge.svg"/></a>
     </br>
+<br>
+PLEASE NOTE THIS IS A FORK OF THE MACXQ FOXESS CLOUD REPOSITORY, IT IS SUBJECT TO CHANGE AND NO SUPPORT CAN BE PROVIDED AT THIS STAGE
+
+
 </h2>
+
+
 
 ## ⚙️ Installation & ♻️ Update
 
@@ -93,7 +99,9 @@ Bat Temp | °C
 Ambient Temp | °C
 Boost Temp | °C
 Inv Temp | °C
-
+Residual Energy | kWh
+minSoC | %
+minSoC on Grid | %
 
 💡 If you want to understand energy generation per string check out this wiki [article](https://github.com/macxq/foxess-ha/wiki/Understand-PV-string-power-generation-using-foxess-ha)
 

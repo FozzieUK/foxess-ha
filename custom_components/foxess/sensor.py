@@ -93,6 +93,7 @@ CONF_APIKEY = "apiKey"
 CONF_DEVICESN = "deviceSN"
 CONF_DEVICEID = "deviceID"
 CONF_SYSTEM_ID = "system_id"
+RETRY_NEXT_SLOT = -1
 
 DEFAULT_NAME = "FoxESS"
 DEFAULT_VERIFY_SSL = False # True
@@ -126,7 +127,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     _LOGGER.debug("Device SN:" + deviceSN)
     _LOGGER.debug("Device ID:" + deviceID)
     _LOGGER.debug( f"FoxESS Scan Interval: {SCAN_MINUTES} minutes" )
-    TimeSlice = -1
+    TimeSlice = RETRY_NEXT_SLOT
     LastHour = 0
     allData = {
         "report":{},
@@ -179,7 +180,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             # try the openapi see if we get a response
             if TimeSlice==0:
                 # do this at startup and then every 15 minutes
-                _LOGGER.error("Battery settings read")
+                _LOGGER.debug("Battery settings read")
                 addfail = await getOABatterySettings(hass, allData, deviceSN, apiKey) # read in battery settings, not sure what to do with these yet, poll every 5/15/30/60 mins ?
                 await asyncio.sleep(1)  # delay for OpenAPI between api calls
 
@@ -213,16 +214,17 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
                     else:
                         allData["online"] = False
+                        TimeSlice=RETRY_NEXT_SLOT # failed to get data so try again in 1 minute
                         _LOGGER.debug("getRaw False")
 
                 if allData["online"] == False:
                     _LOGGER.debug("Inverter off-line or cloud timeout, not fetching additional data")
             else:
-                TimeSlice=-1 # failed to get data so try again in a minute
+                TimeSlice=RETRY_NEXT_SLOT # failed to get data so try again in a minute
                 
         # actions here are every minute
         if TimeSlice==15:
-            TimeSlice=-1
+            TimeSlice=RETRY_NEXT_SLOT # reset timeslice and start again from 0
         _LOGGER.debug(f"Auxilliary TimeSlice {TimeSlice}")
 
         _LOGGER.debug(allData)

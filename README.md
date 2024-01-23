@@ -114,7 +114,9 @@ API Error summary:
 - `{"errno":41807,"result":null}` ⟶ wrong user name or password
 - `{"errno":41808,"result":null}` ⟶ token expierd
 - `{"errno":41809,"result":null}` ⟶ invalid token
-
+- `{"errno":40256,"result":null}` ⟶ The request header parameters are missing. Check whether the request headers are consistent with OpenAPI requirements.
+- `{"errno":40257,"result":null}` ⟶ The request body parameters are invalid. Check whether the request body is consistent with OpenAPI requirements.
+- `{"errno":40400,"result":null}` ⟶ The number of requests is too frequent. Please reduce the frequency of access.
 
 Increase log level in your `/configuration.yaml` by adding:
 

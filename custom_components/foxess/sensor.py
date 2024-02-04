@@ -197,12 +197,13 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                     # main real time data fetch, followed by reports
                     getError = await getRaw(hass, headersData, allData, apiKey, deviceSN, deviceID)
                     if getError == False:
-                        if TimeSlice==0 or LastHour != hournow: # do this at startup, every 15 minutes and on the hour change
-                            LastHour = hournow # update the hour the last report was run
+                        if TimeSlice==0 or TimeSlice==15 or LastHour != hournow: # do this at startup, every 15 minutes and on the hour change
+                            if LastHour != hournow:
+                                LastHour = hournow # update the hour the last daily report was run
                             getError = await getReport(hass, headersData, allData, apiKey, deviceSN, deviceID)
                             if getError == False:
                                 if TimeSlice==0:
-                                    # do this at startup, then every 15 minutes
+                                    # do this at startup, then every 30 minutes
                                     getError = await getReportDailyGeneration(hass, headersData, allData, apiKey, deviceSN, deviceID)
                                     if getError == True:
                                         allData["online"] = False
@@ -225,7 +226,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 TimeSlice=RETRY_NEXT_SLOT # failed to get data so try again in a minute
                 
         # actions here are every minute
-        if TimeSlice==15:
+        if TimeSlice==30:
             TimeSlice=RETRY_NEXT_SLOT # reset timeslice and start again from 0
         _LOGGER.debug(f"Auxilliary TimeSlice {TimeSlice}")
 

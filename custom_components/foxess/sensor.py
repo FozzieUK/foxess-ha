@@ -151,7 +151,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         hournow = datetime.now().strftime("%_H") # update hour now
         _LOGGER.debug(f"Time now: {hournow}, last {LastHour}")
         TSlice = TimeSlice[deviceSN] + 1 # get the time slice for the current device and increment it
-        # TSlice+=1
         TimeSlice[deviceSN] = TSlice
         if (TSlice % 5 == 0):
             _LOGGER.debug(f"TimeSlice Main Poll, interval: {deviceSN}, {TimeSlice[deviceSN]}")
@@ -223,9 +222,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                         _LOGGER.debug("getRaw False")
 
                 if allData["online"] == False:
-                    _LOGGER.warning("Cloud timeout or the Inverter is off-line, connection will be retried in 1 minute")
+                    _LOGGER.warning(f"{name} has Cloud timeout or the Inverter is off-line, connection will be retried in 1 minute")
             else:
-                _LOGGER.warning("Cloud timeout or the Inverter is off-line, connection will be retried in 1 minute.")
+                _LOGGER.warning(f"{name} has Cloud timeout or the Inverter is off-line, connection will be retried in 1 minute.")
                 TSlice=RETRY_NEXT_SLOT # failed to get data so try again in a minute
                 
         # actions here are every minute
@@ -401,8 +400,8 @@ async def authAndgetToken(hass, username, hashedPassword):
 
 
 async def getAddresbook(hass, headersData, allData, username, hashedPassword, deviceID):
-    restAddressBook = RestData(hass, METHOD_GET, _ENDPOINT_ADDRESSBOOK +
-                               deviceID, DEFAULT_ENCODING,  None, headersData, None, None, DEFAULT_VERIFY_SSL, SSLCipherList.PYTHON_DEFAULT, DEFAULT_TIMEOUT)
+    restAddressBook = RestData( hass, METHOD_GET, _ENDPOINT_ADDRESSBOOK +
+                                deviceID, DEFAULT_ENCODING,  None, headersData, None, None, DEFAULT_VERIFY_SSL, SSLCipherList.PYTHON_DEFAULT, DEFAULT_TIMEOUT)
     await restAddressBook.async_update()
 
     if restAddressBook.data is None:

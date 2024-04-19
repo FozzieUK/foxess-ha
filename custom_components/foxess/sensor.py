@@ -310,6 +310,7 @@ class GetAuth:
                           'Chrome/117.0.0.0 Safari/537.36',
             'Connection': 'close'
         }
+
         return result
 
     @staticmethod
